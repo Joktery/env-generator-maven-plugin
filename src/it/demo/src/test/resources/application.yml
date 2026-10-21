@@ -1,0 +1,5 @@
+# Test-only config — must NOT end up in .env.example
+test:
+  datasource:
+    url: jdbc:h2:mem:test;DB_CLOSE_DELAY=-1
+    password: ${TEST_ONLY_PASSWORD:test-pass}

@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: demo-app
+
+app:
+  datasource:
+    # ${COMMENTED_OUT_VAR:nope} — must not appear in .env.example
+    url: jdbc:postgresql://${DB_HOST:${DEFAULT_DB_HOST:localhost}}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD:}
+    pool-size: ${POOL_SIZE:10}
+  security:
+    jwt-secret: ${JWT_SECRET}
+    # property references must be ignored
+    redirect-uri: ${app.security.base-uri}/callback
+    external-url: ${some.service.url:${EXTERNAL_FALLBACK_URL:https://fallback.example.com}}
+  scheduler:
+    cron: "0 0 * * * *"   # inline comment with ${INLINE_COMMENT_VAR:x} — yml inline, kept (not stripped)
+  welcome-message: ${WELCOME_MESSAGE:Hello world}
