@@ -62,6 +62,11 @@ public class EnvGeneratorMojo extends AbstractMojo {
     @Parameter(property = "envgen.envNamePattern", defaultValue = PlaceholderExtractor.DEFAULT_ENV_NAME_PATTERN)
     private String envNamePattern;
 
+    /** Prefix every found variable with {@code PREFIX_} (e.g. {@code DB_HOST} -> {@code MYAPP_DB_HOST});
+     *  names already starting with the prefix are left as is. Empty = prefixing off. */
+    @Parameter(property = "envgen.keyPrefix")
+    private String keyPrefix;
+
     /** Write placeholder defaults as values; when false, all entries are written empty. */
     @Parameter(property = "envgen.includeDefaults", defaultValue = "true")
     private boolean includeDefaults;
@@ -93,6 +98,7 @@ public class EnvGeneratorMojo extends AbstractMojo {
         }
 
         Charset cs = resolveCharset();
+        String prefix = normalizeKeyPrefix();
         PlaceholderExtractor extractor;
         try {
             extractor = new PlaceholderExtractor(envNamePattern);
@@ -106,14 +112,14 @@ public class EnvGeneratorMojo extends AbstractMojo {
 
         JavaSourceScanner javaScanner = scanJavaSources ? new JavaSourceScanner() : null;
         for (Path file : collectFiles(sourceDirs, includes, excludes)) {
-            scanConfig(readFile(file, cs), extractor, defaults, sources, relativeToBasedir(file));
+            scanConfig(readFile(file, cs), extractor, defaults, sources, relativeToBasedir(file), prefix);
         }
 
         if (scanJavaSources) {
             File mainJava = new File(project.getBuild().getSourceDirectory());
             List<String> javaExcludes = new ArrayList<>(excludes);
             for (Path file : collectFiles(listOf(mainJava), listOf("**/*.java"), javaExcludes)) {
-                scanJava(readFile(file, cs), javaScanner, extractor, defaults, sources, relativeToBasedir(file));
+                scanJava(readFile(file, cs), javaScanner, extractor, defaults, sources, relativeToBasedir(file), prefix);
             }
         }
 
@@ -129,7 +135,7 @@ public class EnvGeneratorMojo extends AbstractMojo {
         EnvFileMerger.Result result;
         try {
             existing = merger.parseExisting(output, cs);
-            result = merger.merge(existing, defaults, includeDefaults);
+            result = merger.merge(existing, defaults, includeDefaults, prefix);
         } catch (IOException e) {
             throw new MojoExecutionException("Failed to read " + output, e);
         }
@@ -139,8 +145,9 @@ public class EnvGeneratorMojo extends AbstractMojo {
         try {
             boolean changed = merger.writeIfChanged(output, merger.render(result.entries, headerComment), cs);
             if (changed) {
-                log.info("env-generator: " + outputFile.getName() + " updated ("
-                        + result.added.size() + " added, " + result.kept.size() + " kept).");
+                log.info("env-generator: " + outputFile.getName() + " updated (" + result.added.size()
+                        + " added, " + result.kept.size() + " kept"
+                        + (result.renamed.isEmpty() ? "" : ", " + result.renamed.size() + " renamed") + ").");
             } else {
                 log.info("env-generator: " + outputFile.getName() + " is up to date.");
             }
@@ -151,29 +158,46 @@ public class EnvGeneratorMojo extends AbstractMojo {
 
     private void scanConfig(String rawText, PlaceholderExtractor extractor,
                             Map<String, String> defaults, SortedMap<String, TreeSet<String>> sources,
-                            String displayPath) {
+                            String displayPath, String prefix) {
         boolean yaml = displayPath.endsWith(".yml") || displayPath.endsWith(".yaml");
         List<Placeholder> found = extractor.extract(PlaceholderExtractor.stripCommentLines(rawText, yaml));
-        accumulate(found, defaults, sources, displayPath);
+        accumulate(found, defaults, sources, displayPath, prefix);
     }
 
     private void scanJava(String rawText, JavaSourceScanner javaScanner, PlaceholderExtractor extractor,
                           Map<String, String> defaults, SortedMap<String, TreeSet<String>> sources,
-                          String displayPath) {
+                          String displayPath, String prefix) {
         List<Placeholder> found = new ArrayList<>();
         javaScanner.scan(rawText, found, extractor);
-        accumulate(found, defaults, sources, displayPath);
+        accumulate(found, defaults, sources, displayPath, prefix);
     }
 
     private void accumulate(List<Placeholder> found, Map<String, String> defaults,
-                            SortedMap<String, TreeSet<String>> sources, String displayPath) {
+                            SortedMap<String, TreeSet<String>> sources, String displayPath, String prefix) {
         for (Placeholder p : found) {
+            String name = EnvFileMerger.applyPrefix(p.name(), prefix);
             // A real default beats a previous no-default occurrence of the same variable.
-            if (p.defaultValue() != null || !defaults.containsKey(p.name())) {
-                defaults.put(p.name(), p.defaultValue());
+            if (p.defaultValue() != null || !defaults.containsKey(name)) {
+                defaults.put(name, p.defaultValue());
             }
-            sources.computeIfAbsent(p.name(), k -> new TreeSet<>()).add(displayPath);
+            sources.computeIfAbsent(name, k -> new TreeSet<>()).add(displayPath);
         }
+    }
+
+    /** Trims the configured prefix and strips trailing underscores; {@code null} means prefixing is off. */
+    private String normalizeKeyPrefix() throws MojoExecutionException {
+        String prefix = keyPrefix == null ? "" : keyPrefix.trim();
+        while (prefix.endsWith("_")) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+        if (prefix.isEmpty()) {
+            return null;
+        }
+        if (!prefix.matches("[A-Za-z][A-Za-z0-9_]*")) {
+            throw new MojoExecutionException("Invalid envgen.keyPrefix: '" + keyPrefix
+                    + "' (expected letters/digits/underscores, starting with a letter, e.g. MYAPP)");
+        }
+        return prefix;
     }
 
     private void report(EnvFileMerger.Result result, SortedMap<String, TreeSet<String>> sources, Log log) {
@@ -183,6 +207,9 @@ public class EnvGeneratorMojo extends AbstractMojo {
         }
         for (String name : result.kept) {
             log.debug("env-generator: = " + name + " kept existing value");
+        }
+        for (String rename : result.renamed) {
+            log.info("env-generator: " + rename + " (keyPrefix enabled); value carried over");
         }
         for (String name : result.obsolete) {
             log.warn("env-generator: '" + name + "' is present in " + outputFile.getName()

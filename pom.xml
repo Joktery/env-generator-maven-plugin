@@ -6,7 +6,7 @@
 
     <groupId>ru.joktery</groupId>
     <artifactId>env-generator-maven-plugin</artifactId>
-    <version>0.2</version>
+    <version>0.3</version>
     <packaging>maven-plugin</packaging>
 
     <name>Env Generator Maven Plugin</name>

@@ -31,9 +31,9 @@ Rules:
 
 ```xml
 <plugin>
-    <groupId>org.example</groupId>
+    <groupId>ru.joktery</groupId>
     <artifactId>env-generator-maven-plugin</artifactId>
-    <version>0.2</version>
+    <version>0.3</version>
     <executions>
         <execution>
             <goals>
@@ -56,6 +56,7 @@ From now on `mvn compile` keeps your `.env.example` up to date.
 | `excludes` | — | `**/target/**` | Ant-style exclude patterns |
 | `scanJavaSources` | `envgen.scanJavaSources` | `false` | scan `src/main/java` for `System.getenv`/`@Value` |
 | `envNamePattern` | `envgen.envNamePattern` | `[A-Z][A-Z0-9_]*` | regex a placeholder name must match to be treated as an env variable |
+| `keyPrefix` | `envgen.keyPrefix` | — (off) | prefix every variable to make it project-unique, e.g. `MYAPP` → `MYAPP_DB_HOST`; names already starting with the prefix are left as is |
 | `includeDefaults` | `envgen.includeDefaults` | `true` | write defaults as values; `false` — all values empty |
 | `headerComment` | `envgen.headerComment` | auto text | file header (multiline via `\n`); empty string disables it |
 | `encoding` | `envgen.encoding` | `${project.build.sourceEncoding}` / UTF-8 | encoding for reading and writing |
@@ -102,6 +103,27 @@ DEFAULT_DB_HOST=localhost
 WELCOME_MESSAGE="Hello world"
 ```
 
+## Per-project variable prefix
+
+When several projects share one environment (a single CI secret store, a shared dotenv file),
+variable names must not collide. `keyPrefix` makes every variable of the project unique:
+
+```xml
+<configuration>
+    <keyPrefix>MYAPP</keyPrefix>
+</configuration>
+```
+
+Behavior:
+
+- every found variable is written as `MYAPP_NAME`: `DB_HOST` → `MYAPP_DB_HOST`; this applies
+  to all sources — configs, `@Value`, `System.getenv`/`getProperty` (lowercase names included)
+- names that already start with `MYAPP_` are left as is — no double prefix
+- when the prefix is enabled for the first time, values already present in `.env.example`
+  are carried over: `DB_HOST=prod-db` becomes `MYAPP_DB_HOST=prod-db` (logged as INFO)
+
+The prefix affects only `.env.example`; project sources are not modified.
+
 ## Known limitations (MVP)
 
 - the file is rewritten as a whole: comments and grouping added by hand inside
@@ -113,8 +135,10 @@ WELCOME_MESSAGE="Hello world"
 ## Development
 
 - `mvn clean install` — build, tests, install into the local repository
-- `src/it/demo` — demo project: `mvn -f src/it/demo/pom.xml compile` generates
-  `src/it/demo/.env.example` and exercises the whole cycle
+- `src/it/demo` — demo project (default behavior, no prefix): `mvn -f src/it/demo/pom.xml compile`
+  generates `src/it/demo/.env.example` and exercises the whole cycle
+- `src/it/demo-prefix` — demo project with `<keyPrefix>MYAPP</keyPrefix>`: all keys come out
+  as `MYAPP_*`, already-prefixed names stay single-prefixed
 
 Ideas for future versions: preserving user comments, grouping by source file,
 a `removeObsolete` option, Spring `${env.VAR}` prefix support.

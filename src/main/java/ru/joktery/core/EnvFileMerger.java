@@ -26,6 +26,8 @@ public final class EnvFileMerger {
         public final List<String> added = new ArrayList<>();
         public final List<String> kept = new ArrayList<>();
         public final List<String> obsolete = new ArrayList<>();
+        /** {@code OLD -> NEW} entries for keys renamed because of {@code keyPrefix}. */
+        public final List<String> renamed = new ArrayList<>();
     }
 
     /** Parses {@code KEY=value} lines; ignores comments, blank lines and {@code export} prefixes. */
@@ -55,8 +57,25 @@ public final class EnvFileMerger {
      * @param defaults env variables found in the project: name → default value (may be null)
      */
     public Result merge(SortedMap<String, String> existing, Map<String, String> defaults, boolean includeDefaults) {
+        return merge(existing, defaults, includeDefaults, null);
+    }
+
+    /**
+     * Same as {@link #merge(SortedMap, Map, boolean)}, but with {@code keyPrefix} set every
+     * legacy unprefixed entry whose variable is now found as {@code PREFIX_name} is renamed to
+     * the prefixed form with its value carried over.
+     *
+     * @param defaults env variables found in the project: name → default value (may be null);
+     *                 keys must already be prefixed (see {@link #applyPrefix(String, String)})
+     * @param keyPrefix normalized prefix or {@code null} to disable renaming
+     */
+    public Result merge(SortedMap<String, String> existing, Map<String, String> defaults,
+                        boolean includeDefaults, String keyPrefix) {
         Result result = new Result();
         result.entries.putAll(existing);
+        if (keyPrefix != null && !keyPrefix.isEmpty()) {
+            renameLegacyKeys(existing, defaults, keyPrefix, result);
+        }
         for (Map.Entry<String, String> e : defaults.entrySet()) {
             if (result.entries.containsKey(e.getKey())) {
                 result.kept.add(e.getKey());
@@ -66,12 +85,42 @@ public final class EnvFileMerger {
                 result.added.add(e.getKey());
             }
         }
-        for (String key : existing.keySet()) {
+        for (String key : result.entries.keySet()) {
             if (!defaults.containsKey(key)) {
                 result.obsolete.add(key);
             }
         }
         return result;
+    }
+
+    /**
+     * Returns {@code name} prefixed with {@code PREFIX_}. A name that already starts with the
+     * prefix (or equals it) is returned as is, so enabling the prefix twice never double-prefixes.
+     * A null/empty prefix leaves the name untouched.
+     */
+    public static String applyPrefix(String name, String prefix) {
+        if (prefix == null || prefix.isEmpty()) {
+            return name;
+        }
+        if (name.equals(prefix) || name.startsWith(prefix + "_")) {
+            return name;
+        }
+        return prefix + "_" + name;
+    }
+
+    private void renameLegacyKeys(SortedMap<String, String> existing, Map<String, String> defaults,
+                                  String keyPrefix, Result result) {
+        for (String key : new ArrayList<>(existing.keySet())) {
+            String prefixed = keyPrefix + "_" + key;
+            // No rename when the plain variable is still found, or the file already has the
+            // prefixed entry — then the legacy key simply becomes obsolete.
+            if (defaults.containsKey(prefixed) && !defaults.containsKey(key)
+                    && !existing.containsKey(prefixed)) {
+                result.entries.put(prefixed, existing.get(key));
+                result.entries.remove(key);
+                result.renamed.add(key + " -> " + prefixed);
+            }
+        }
     }
 
     /** Quotes values that would otherwise be truncated by dotenv parsers (spaces, {@code #}). */

@@ -92,6 +92,100 @@ class EnvFileMergerTest {
     }
 
     @Test
+    void applyPrefixAddsPrefixUnlessAlreadyPresent() {
+        assertEquals("MYAPP_DB_HOST", EnvFileMerger.applyPrefix("DB_HOST", "MYAPP"));
+        // already prefixed (or exactly the prefix) — left as is, never double-prefixed
+        assertEquals("MYAPP_DB_HOST", EnvFileMerger.applyPrefix("MYAPP_DB_HOST", "MYAPP"));
+        assertEquals("MYAPP", EnvFileMerger.applyPrefix("MYAPP", "MYAPP"));
+        // a similar-looking but different prefix is not treated as already present
+        assertEquals("MYAPP_MYAPP2_FOO", EnvFileMerger.applyPrefix("MYAPP2_FOO", "MYAPP"));
+        // lowercase and dotted getenv names are prefixed like any other
+        assertEquals("MYAPP_awsRegion", EnvFileMerger.applyPrefix("awsRegion", "MYAPP"));
+        // null/empty prefix disables prefixing
+        assertEquals("DB_HOST", EnvFileMerger.applyPrefix("DB_HOST", null));
+        assertEquals("DB_HOST", EnvFileMerger.applyPrefix("DB_HOST", ""));
+    }
+
+    @Test
+    void mergeWithPrefixWritesPrefixedKeys() {
+        // defaults arrive already prefixed (the Mojo applies keyPrefix while accumulating)
+        SortedMap<String, String> existing = new TreeMap<>();
+        Map<String, String> defaults = new TreeMap<>();
+        defaults.put("MYAPP_DB_HOST", "localhost");
+        defaults.put("MYAPP_ALREADY_SET", "yes");
+
+        EnvFileMerger.Result result = merger.merge(existing, defaults, true, "MYAPP");
+
+        assertEquals("localhost", result.entries.get("MYAPP_DB_HOST"));
+        assertEquals("yes", result.entries.get("MYAPP_ALREADY_SET"));
+        assertEquals(2, result.entries.size());
+    }
+
+    @Test
+    void prefixMigrationRenamesLegacyEntryAndCarriesValueOver() {
+        SortedMap<String, String> existing = new TreeMap<>();
+        existing.put("DB_HOST", "prod-db.example.com");
+        existing.put("GONE_VAR", "x");
+        Map<String, String> defaults = new TreeMap<>();
+        defaults.put("MYAPP_DB_HOST", "localhost");
+
+        EnvFileMerger.Result result = merger.merge(existing, defaults, true, "MYAPP");
+
+        assertEquals("prod-db.example.com", result.entries.get("MYAPP_DB_HOST"));
+        assertEquals(1, result.renamed.size());
+        assertEquals("DB_HOST -> MYAPP_DB_HOST", result.renamed.get(0));
+        // the renamed key is live, only the genuinely disappeared one is obsolete
+        assertEquals(1, result.obsolete.size());
+        assertEquals("GONE_VAR", result.obsolete.get(0));
+    }
+
+    @Test
+    void prefixedExistingEntryIsKeptWithoutRename() {
+        SortedMap<String, String> existing = new TreeMap<>();
+        existing.put("MYAPP_DB_HOST", "prod-db.example.com");
+        Map<String, String> defaults = Map.of("MYAPP_DB_HOST", "localhost");
+
+        EnvFileMerger.Result result = merger.merge(existing, defaults, true, "MYAPP");
+
+        assertEquals("prod-db.example.com", result.entries.get("MYAPP_DB_HOST"));
+        assertTrue(result.renamed.isEmpty());
+        assertTrue(result.added.isEmpty());
+        assertTrue(result.kept.contains("MYAPP_DB_HOST"));
+    }
+
+    @Test
+    void migrationSkippedWhenBothPrefixedAndLegacyEntriesExist() {
+        SortedMap<String, String> existing = new TreeMap<>();
+        existing.put("DB_HOST", "plain");
+        existing.put("MYAPP_DB_HOST", "prefixed");
+        Map<String, String> defaults = Map.of("MYAPP_DB_HOST", "localhost");
+
+        EnvFileMerger.Result result = merger.merge(existing, defaults, true, "MYAPP");
+
+        assertEquals("plain", result.entries.get("DB_HOST"));
+        assertEquals("prefixed", result.entries.get("MYAPP_DB_HOST"));
+        assertTrue(result.renamed.isEmpty());
+        assertEquals(1, result.obsolete.size());
+        assertEquals("DB_HOST", result.obsolete.get(0));
+    }
+
+    @Test
+    void migrationSkippedWhenPlainVarIsStillFound() {
+        SortedMap<String, String> existing = new TreeMap<>();
+        existing.put("DB_HOST", "plain");
+        Map<String, String> defaults = new TreeMap<>();
+        defaults.put("DB_HOST", null);
+        defaults.put("MYAPP_DB_HOST", "localhost");
+
+        EnvFileMerger.Result result = merger.merge(existing, defaults, true, "MYAPP");
+
+        assertEquals("plain", result.entries.get("DB_HOST"));
+        assertEquals("localhost", result.entries.get("MYAPP_DB_HOST"));
+        assertTrue(result.renamed.isEmpty());
+        assertTrue(result.obsolete.isEmpty());
+    }
+
+    @Test
     void valuesWithSpacesOrHashAreQuoted() {
         assertEquals("\"hello world\"", EnvFileMerger.quote("hello world"));
         assertEquals("\"a#b\"", EnvFileMerger.quote("a#b"));

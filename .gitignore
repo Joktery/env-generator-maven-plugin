@@ -39,4 +39,7 @@ build/
 ### Mac OS ###
 .DS_Store
 
-src/it/demo/.env.example
+### ZCode ###
+.zcode/
+
+src/it/*/.env.example

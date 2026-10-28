@@ -17,9 +17,9 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>org.example</groupId>
+                <groupId>ru.joktery</groupId>
                 <artifactId>env-generator-maven-plugin</artifactId>
-                <version>0.2</version>
+                <version>0.3</version>
                 <configuration>
                     <scanJavaSources>true</scanJavaSources>
                 </configuration>

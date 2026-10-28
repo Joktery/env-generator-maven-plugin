@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: demo-prefix-app
+
+app:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:${DEFAULT_DB_HOST:localhost}}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD:}
+  welcome-message: ${WELCOME_MESSAGE:Hello world}
